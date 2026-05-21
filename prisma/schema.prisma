@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  stripeEventId     String   @unique
+  stripeChargeId    String   @unique
+  merchantId        String   @default("demo-merchant")
+  customerEmail     String?
+  billingCity       String?
+  billingState      String?
+  billingZip        String?
+  billingCountry    String?
+  amountCents       Int
+  currency          String   @default("usd")
+  taxAmountCents    Int      @default(0)
+  taxRate           Float    @default(0)
+  jurisdictionState String?
+  jurisdictionName  String?
+  status            String   @default("RECORDED")
+  processedAt       DateTime @default(now())
+  stripeCreatedAt   DateTime
+  metadata          Json?
+
+  reconciliationGaps ReconciliationGap[]
+
+  @@index([billingState])
+  @@index([processedAt])
+  @@index([stripeChargeId])
+}
+
+model IdempotencyKey {
+  id        String   @id
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model ReconciliationGap {
+  id              String    @id @default(cuid())
+  runId           String
+  gapType         String
+  stripeChargeId  String
+  stripeAmount    Int?
+  localAmount     Int?
+  severity        String    @default("HIGH")
+  resolvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  transactionId   String?
+  transaction     Transaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([runId])
+  @@index([gapType])
+}
+
+model ReconciliationRun {
+  id           String   @id @default(cuid())
+  status       String   @default("RUNNING")
+  totalStripe  Int      @default(0)
+  totalLocal   Int      @default(0)
+  gapsFound    Int      @default(0)
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+}
+
+model NexusExposure {
+  id                String   @id @default(cuid())
+  merchantId        String   @default("demo-merchant")
+  stateCode         String
+  stateName         String
+  totalRevenueCents Int      @default(0)
+  transactionCount  Int      @default(0)
+  revenueThreshold  Int      @default(10000000)
+  txThreshold       Int      @default(200)
+  thresholdStatus   String   @default("SAFE")
+  updatedAt         DateTime @updatedAt
+
+  @@unique([merchantId, stateCode])
+  @@index([thresholdStatus])
+}
+
+model WebhookEvent {
+  id           String   @id
+  type         String
+  status       String   @default("PENDING")
+  rawPayload   Json
+  errorMessage String?
+  receivedAt   DateTime @default(now())
+  processedAt  DateTime?
+
+  @@index([status])
+  @@index([type])
+}
