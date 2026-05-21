@@ -14,6 +14,8 @@
   "scripts": {
     "dev": "next dev",
     "worker": "tsx workers/transactionWorker.ts",
+    "sync": "tsx -r dotenv/config scripts/sync-stripe.ts dotenv_config_path=.env.local",
+    "cleanup": "tsx -r dotenv/config scripts/cleanup.ts dotenv_config_path=.env.local",
     "dev:full": "concurrently -n web,worker -c blue,magenta \"pnpm dev\" \"pnpm worker\"",
     "build": "next build",
     "start": "next start",
@@ -42,6 +44,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "concurrently": "^9.2.1",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",

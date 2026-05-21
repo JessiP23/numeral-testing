@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MetricCard } from "./MetricCard";
 import { TransactionTimeline } from "./TransactionTimeline";
 import { ReconciliationPanel } from "./ReconciliationPanel";
 import { NexusTracker } from "./NexusTracker";
 import { EventLog } from "./EventLog";
+import { SystemStatus } from "./SystemStatus";
 
 type Props = {
   transactions: any[];
@@ -30,19 +31,40 @@ export default function DashboardClient(props: Props) {
   const [isPending, startTransition] = useTransition();
   const [seeding, setSeeding] = useState(false);
   const [highlightState, setHighlightState] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Live polling — pulls fresh server-rendered data into the page every 3s.
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = setInterval(() => {
+      startTransition(() => router.refresh());
+    }, 3000);
+    return () => clearInterval(id);
+  }, [autoRefresh, router]);
 
   const openGaps = props.gaps.length;
 
+  const [seedMsg, setSeedMsg] = useState<string | null>(null);
+
   async function handleSeed() {
     setSeeding(true);
+    setSeedMsg(null);
     try {
       const res = await fetch("/api/seed", { method: "POST" });
       const data = await res.json();
-      console.log("[seed]", data);
-      // Webhooks are async; give the worker a beat then refresh.
+      const failed = (data.results ?? []).filter((r: { error?: string }) => r.error);
+      if (failed.length > 0) {
+        setSeedMsg(
+          `Stripe rejected ${failed.length}/${data.seeded} charges. First error: ${failed[0].error}`
+        );
+      } else {
+        setSeedMsg(
+          `Seeded ${data.seeded} Stripe charges. If the dashboard stays empty, check the system-status row above — webhooks need 'stripe listen' running.`
+        );
+      }
       setTimeout(() => startTransition(() => router.refresh()), 1500);
     } catch (e) {
-      console.error(e);
+      setSeedMsg(e instanceof Error ? e.message : "Seed failed");
     } finally {
       setSeeding(false);
     }
@@ -68,13 +90,28 @@ export default function DashboardClient(props: Props) {
             >
               {seeding ? "Seeding…" : "Generate Test Data"}
             </button>
+            <label className="flex items-center gap-1.5 border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="accent-sky-500"
+              />
+              Auto-refresh
+            </label>
             <button
               onClick={() => startTransition(() => router.refresh())}
               className="border border-zinc-700 bg-zinc-900 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-zinc-300 hover:bg-zinc-800"
             >
-              {isPending ? "Refreshing…" : "Refresh"}
+              {isPending ? "…" : "Refresh"}
             </button>
           </div>
+        </div>
+        <div className="mt-3 flex items-center justify-between">
+          <SystemStatus />
+          {seedMsg && (
+            <span className="font-mono text-[10px] text-zinc-400">{seedMsg}</span>
+          )}
         </div>
         {props.dbError && (
           <div className="mt-3 border border-rose-500/40 bg-rose-500/10 px-3 py-2 font-mono text-[11px] text-rose-300">
