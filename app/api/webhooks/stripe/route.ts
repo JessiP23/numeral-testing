@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { transactionQueue } from "@/lib/queue";
+import { isChaosMode } from "@/lib/chaos";
 import type Stripe from "stripe";
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
@@ -25,7 +26,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Audit log: persist raw event before processing.
+  // Audit log: persist raw event before processing. This row is the
+  // append-only audit trail — the rawPayload is never modified after this
+  // write, only the status field is updated by the worker.
   await prisma.webhookEvent.upsert({
     where: { id: event.id },
     update: {},
@@ -37,6 +40,20 @@ export async function POST(req: NextRequest) {
       receivedAt: new Date(),
     },
   });
+
+  // CHAOS MODE: simulate webhook drops. Return 200 (so Stripe doesn't retry
+  // immediately) and silently fail to enqueue. The reconciliation job will
+  // catch the gap as MISSING_IN_LOCAL — the operational story.
+  if (isChaosMode() && SUPPORTED_EVENTS.has(event.type) && Math.random() < 0.5) {
+    await prisma.webhookEvent.update({
+      where: { id: event.id },
+      data: {
+        status: "FAILED",
+        errorMessage: "[CHAOS MODE] Event dropped intentionally",
+      },
+    });
+    return NextResponse.json({ received: true, chaosDropped: true });
+  }
 
   if (SUPPORTED_EVENTS.has(event.type)) {
     await transactionQueue.add(

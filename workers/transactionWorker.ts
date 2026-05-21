@@ -11,6 +11,15 @@ const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
   maxRetriesPerRequest: null,
 });
 
+// Sanity log — confirms which DB this worker is talking to. If this doesn't
+// match the web app's DB, webhook-event rows will look "missing" to the worker.
+{
+  const dbUrl = process.env.DATABASE_URL ?? "(unset)";
+  const masked = dbUrl.replace(/:[^:@/]+@/, ":****@");
+  console.log(`[worker] DATABASE_URL = ${masked}`);
+  console.log(`[worker] REDIS_URL    = ${process.env.REDIS_URL ?? "(default localhost:6379)"}`);
+}
+
 async function upsertNexusExposure(stateCode: string, amountCents: number) {
   const jurisdiction = JURISDICTION_MAP[stateCode];
   if (!jurisdiction) return;
@@ -63,9 +72,18 @@ const worker = new Worker(
     const acquired = await redis.set(idempKey, "1", "EX", 86400, "NX");
 
     if (!acquired) {
-      await prisma.webhookEvent.update({
+      // Use upsert: row may not exist if webhook handler hit a different DB
+      // (e.g. during a config change). Don't let that wedge the queue.
+      await prisma.webhookEvent.upsert({
         where: { id: eventId },
-        data: { status: "DUPLICATE", processedAt: new Date() },
+        update: { status: "DUPLICATE", processedAt: new Date() },
+        create: {
+          id: eventId,
+          type: eventType,
+          status: "DUPLICATE",
+          rawPayload: payload as unknown as object,
+          processedAt: new Date(),
+        },
       });
       return { skipped: true, reason: "duplicate" };
     }
@@ -87,9 +105,16 @@ const worker = new Worker(
           await upsertNexusExposure(normalized.billingState, normalized.amountCents);
         }
 
-        await prisma.webhookEvent.update({
+        await prisma.webhookEvent.upsert({
           where: { id: eventId },
-          data: { status: "PROCESSED", processedAt: new Date() },
+          update: { status: "PROCESSED", processedAt: new Date() },
+          create: {
+            id: eventId,
+            type: eventType,
+            status: "PROCESSED",
+            rawPayload: charge as unknown as object,
+            processedAt: new Date(),
+          },
         });
 
         return { transactionId: tx.id };
@@ -102,19 +127,31 @@ const worker = new Worker(
           data: { status: "REFUNDED" },
         });
 
-        await prisma.webhookEvent.update({
+        await prisma.webhookEvent.upsert({
           where: { id: eventId },
-          data: { status: "PROCESSED", processedAt: new Date() },
+          update: { status: "PROCESSED", processedAt: new Date() },
+          create: {
+            id: eventId,
+            type: eventType,
+            status: "PROCESSED",
+            rawPayload: charge as unknown as object,
+            processedAt: new Date(),
+          },
         });
 
         return { refunded: charge.id };
       }
     } catch (error) {
-      await prisma.webhookEvent.update({
+      const msg = error instanceof Error ? error.message : String(error);
+      await prisma.webhookEvent.upsert({
         where: { id: eventId },
-        data: {
+        update: { status: "FAILED", errorMessage: msg },
+        create: {
+          id: eventId,
+          type: eventType,
           status: "FAILED",
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorMessage: msg,
+          rawPayload: payload as unknown as object,
         },
       });
       throw error; // BullMQ retry with exponential backoff

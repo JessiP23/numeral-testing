@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "worker": "tsx workers/transactionWorker.ts",
+    "worker": "tsx -r dotenv/config workers/transactionWorker.ts dotenv_config_path=.env.local",
     "sync": "tsx -r dotenv/config scripts/sync-stripe.ts dotenv_config_path=.env.local",
     "cleanup": "tsx -r dotenv/config scripts/cleanup.ts dotenv_config_path=.env.local",
     "dev:full": "concurrently -n web,worker -c blue,magenta \"pnpm dev\" \"pnpm worker\"",

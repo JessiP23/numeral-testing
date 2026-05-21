@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge, statusToVariant } from "./StatusBadge";
 
+async function retryGap(gapId: string) {
+  const res = await fetch(`/api/gaps/${gapId}/retry`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Retry failed (${res.status})`);
+  }
+  return res.json() as Promise<{ queued: boolean; jobId: string; chargeId: string }>;
+}
+
 type Run = {
   id: string;
   status: string;
@@ -49,6 +58,20 @@ export function ReconciliationPanel({
   const router = useRouter();
   const [running, setRunning] = useState(latestRun?.status === "RUNNING");
   const [run, setRun] = useState<Run>(latestRun);
+  const [retrying, setRetrying] = useState<Record<string, boolean>>({});
+
+  async function handleRetry(gapId: string) {
+    setRetrying((prev) => ({ ...prev, [gapId]: true }));
+    try {
+      await retryGap(gapId);
+      // Worker resolves the gap async; pull fresh data after it's had a beat.
+      setTimeout(() => router.refresh(), 1500);
+    } catch (err) {
+      console.error("[retry]", err);
+    } finally {
+      setRetrying((prev) => ({ ...prev, [gapId]: false }));
+    }
+  }
 
   // Poll while a run is in progress.
   useEffect(() => {
@@ -143,33 +166,51 @@ export function ReconciliationPanel({
               <th className="px-3 py-2 font-medium">Type</th>
               <th className="px-3 py-2 text-right font-medium">Stripe</th>
               <th className="px-3 py-2 text-right font-medium">Local</th>
+              <th className="px-3 py-2 text-right font-medium">Action</th>
             </tr>
           </thead>
           <tbody>
             {gaps.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-zinc-600">
+                <td colSpan={5} className="px-3 py-6 text-center text-zinc-600">
                   No open gaps
                 </td>
               </tr>
             )}
-            {gaps.map((g) => (
-              <tr key={g.id} className="border-b border-zinc-900">
-                <td className="px-3 py-2 text-zinc-300">{g.stripeChargeId.slice(0, 18)}…</td>
-                <td className="px-3 py-2">
-                  <StatusBadge
-                    label={g.gapType}
-                    variant={GAP_VARIANT[g.gapType] ?? "neutral"}
-                  />
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                  {fmtMoney(g.stripeAmount)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
-                  {fmtMoney(g.localAmount)}
-                </td>
-              </tr>
-            ))}
+            {gaps.map((g) => {
+              const canRetry = g.gapType === "MISSING_IN_LOCAL";
+              const isRetrying = retrying[g.id];
+              return (
+                <tr key={g.id} className="border-b border-zinc-900">
+                  <td className="px-3 py-2 text-zinc-300">{g.stripeChargeId.slice(0, 18)}…</td>
+                  <td className="px-3 py-2">
+                    <StatusBadge
+                      label={g.gapType}
+                      variant={GAP_VARIANT[g.gapType] ?? "neutral"}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    {fmtMoney(g.stripeAmount)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-300">
+                    {fmtMoney(g.localAmount)}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {canRetry ? (
+                      <button
+                        onClick={() => handleRetry(g.id)}
+                        disabled={isRetrying}
+                        className="border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        {isRetrying ? "…" : "Retry"}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-[10px] text-zinc-600">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

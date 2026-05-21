@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Redis from "ioredis";
 import { Queue } from "bullmq";
 import { prisma } from "@/lib/prisma";
+import { isChaosMode } from "@/lib/chaos";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -93,10 +94,11 @@ async function checkQueue(redisUrl: string): Promise<{
 export async function GET() {
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
 
-  const [db, redis, queue] = await Promise.all([
+  const [db, redis, queue, duplicatesBlocked] = await Promise.all([
     checkDb(),
     checkRedis(redisUrl),
     checkQueue(redisUrl),
+    prisma.webhookEvent.count({ where: { status: "DUPLICATE" } }).catch(() => 0),
   ]);
 
   const stripeConfigured = Boolean(
@@ -111,6 +113,8 @@ export async function GET() {
     redis,
     queue,
     stripe: { secretConfigured: stripeConfigured, webhookConfigured },
+    chaosMode: isChaosMode(),
+    duplicatesBlocked,
     timestamp: new Date().toISOString(),
   });
 }

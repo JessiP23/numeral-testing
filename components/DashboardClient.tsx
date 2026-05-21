@@ -16,6 +16,7 @@ type Props = {
   events: any[];
   latestRun: any;
   summary: { totalRevenue: number; totalTax: number; count: number };
+  duplicatesBlocked: number;
   dbError: string | null;
 };
 
@@ -32,6 +33,27 @@ export default function DashboardClient(props: Props) {
   const [seeding, setSeeding] = useState(false);
   const [highlightState, setHighlightState] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [chaosOn, setChaosOn] = useState(false);
+
+  // Sync chaos state from the server on mount + on each refresh tick.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chaos", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { chaosMode: boolean }) => {
+        if (!cancelled) setChaosOn(Boolean(d.chaosMode));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function toggleChaos() {
+    const res = await fetch("/api/chaos", { method: "POST" });
+    const data = (await res.json()) as { chaosMode: boolean };
+    setChaosOn(Boolean(data.chaosMode));
+  }
 
   // Live polling — pulls fresh server-rendered data into the page every 3s.
   useEffect(() => {
@@ -84,6 +106,17 @@ export default function DashboardClient(props: Props) {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={toggleChaos}
+              className={`border px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest transition-colors ${
+                chaosOn
+                  ? "border-rose-500/60 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              }`}
+              title="When ON, the webhook handler silently drops 50% of incoming events. Use it to demo MISSING_IN_LOCAL gap detection + the Retry recovery flow."
+            >
+              {chaosOn ? "⚡ Chaos ON — 50% drop" : "Chaos Mode"}
+            </button>
+            <button
               onClick={handleSeed}
               disabled={seeding || isPending}
               className="border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 font-mono text-[11px] uppercase tracking-widest text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
@@ -121,7 +154,7 @@ export default function DashboardClient(props: Props) {
       </header>
 
       <main className="px-6 py-6 space-y-6">
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
           <MetricCard label="Transactions" value={props.summary.count.toString()} />
           <MetricCard label="Total Revenue" value={fmtMoney(props.summary.totalRevenue)} />
           <MetricCard label="Tax Collected" value={fmtMoney(props.summary.totalTax)} />
@@ -130,6 +163,11 @@ export default function DashboardClient(props: Props) {
             value={openGaps.toString()}
             sublabel={openGaps > 0 ? "Reconciliation pending" : "All clear"}
             alert={openGaps > 0}
+          />
+          <MetricCard
+            label="◇ Duplicates Blocked"
+            value={props.duplicatesBlocked.toString()}
+            sublabel="Idempotency layer hits"
           />
         </section>
 

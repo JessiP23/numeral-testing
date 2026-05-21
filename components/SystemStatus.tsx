@@ -7,6 +7,8 @@ type Health = {
   redis: { ok: boolean; latencyMs: number; error?: string };
   queue: { ok: boolean; waiting: number; active: number; failed: number; hasWorker: boolean; error?: string };
   stripe: { secretConfigured: boolean; webhookConfigured: boolean };
+  chaosMode?: boolean;
+  duplicatesBlocked?: number;
   timestamp: string;
 };
 

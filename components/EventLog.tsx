@@ -24,9 +24,17 @@ export function EventLog({ events }: { events: Evt[] }) {
   return (
     <div className="border border-zinc-800/80 bg-zinc-950/40">
       <header className="flex items-center justify-between border-b border-zinc-800/80 px-4 py-3">
-        <h2 className="font-mono text-xs uppercase tracking-widest text-zinc-400">
-          Webhook Event Log
-        </h2>
+        <div className="flex items-baseline gap-3">
+          <h2 className="font-mono text-xs uppercase tracking-widest text-zinc-400">
+            Webhook Event Log
+          </h2>
+          <span
+            className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/80"
+            title="Events are written at receive time, before processing. The rawPayload is never modified — only the status field is updated by the worker. Replay-safe append-only audit trail."
+          >
+            ▣ append-only audit
+          </span>
+        </div>
         <span className="font-mono text-[11px] text-zinc-500">{events.length} events</span>
       </header>
 

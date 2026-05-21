@@ -8,7 +8,7 @@ export const revalidate = 0;
 export default async function DashboardPage() {
   let payload;
   try {
-    const [transactions, nexus, gaps, events, latestRun, summary] = await Promise.all([
+    const [transactions, nexus, gaps, events, latestRun, summary, duplicatesBlocked] = await Promise.all([
       prisma.transaction.findMany({ orderBy: { processedAt: "desc" }, take: 50 }),
       prisma.nexusExposure.findMany({ orderBy: { totalRevenueCents: "desc" } }),
       prisma.reconciliationGap.findMany({
@@ -36,6 +36,7 @@ export default async function DashboardPage() {
         _sum: { amountCents: true, taxAmountCents: true },
         _count: { id: true },
       }),
+      prisma.webhookEvent.count({ where: { status: "DUPLICATE" } }),
     ]);
 
     const enrichedNexus = nexus.map((e) => ({
@@ -55,6 +56,7 @@ export default async function DashboardPage() {
         totalTax: summary._sum.taxAmountCents ?? 0,
         count: summary._count.id,
       },
+      duplicatesBlocked,
       dbError: null as string | null,
     };
   } catch (error) {
@@ -65,6 +67,7 @@ export default async function DashboardPage() {
       events: [],
       latestRun: null,
       summary: { totalRevenue: 0, totalTax: 0, count: 0 },
+      duplicatesBlocked: 0,
       dbError: error instanceof Error ? error.message : "Database unreachable",
     };
   }

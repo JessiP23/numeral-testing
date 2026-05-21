@@ -40,7 +40,7 @@ async function runReconciliation(runId: string) {
     select: { stripeChargeId: true, amountCents: true, id: true },
   });
 
-  const localMap = new Map(localTransactions.map((t) => [t.stripeChargeId, t]));
+  const localMap = new Map(localTransactions.map((t: typeof localTransactions[number]) => [t.stripeChargeId, t]));
   const stripeMap = new Map(stripeCharges.map((c) => [c.id, c]));
 
   type GapInput = {
