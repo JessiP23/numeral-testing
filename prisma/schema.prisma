@@ -23,16 +23,43 @@ model Transaction {
   taxRate           Float    @default(0)
   jurisdictionState String?
   jurisdictionName  String?
-  status            String   @default("RECORDED")
+  status            TransactionStatus @default(RECORDED)
   processedAt       DateTime @default(now())
   stripeCreatedAt   DateTime
   metadata          Json?
+  correlationId     String?  // Request-scoped ID for distributed tracing
 
   reconciliationGaps ReconciliationGap[]
+  stateTransitions  TransactionStateTransition[]
 
   @@index([billingState])
   @@index([processedAt])
   @@index([stripeChargeId])
+  @@index([correlationId])
+}
+
+model TransactionStateTransition {
+  id             String   @id @default(cuid())
+  transactionId  String
+  transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fromStatus     TransactionStatus?
+  toStatus       TransactionStatus
+  reason         String?  // Why the transition occurred (e.g., "webhook_received", "refund_processed")
+  metadata       Json?    // Additional context about the transition
+  createdAt      DateTime @default(now())
+
+  @@index([transactionId])
+  @@index([createdAt])
+}
+
+enum TransactionStatus {
+  RECORDED      // Initial state after successful webhook processing
+  REFUNDED      // Charge was refunded
+  ADJUSTED      // Manual adjustment (future: exemption certificate applied)
+  FILED         // Tax filing submitted (future: filing lifecycle)
+  REMITTED      // Tax remitted to jurisdiction (future: filing lifecycle)
+  DISPUTED      // Under review/dispute (future: notice handling)
+  CLOSED        // Final state, no further changes
 }
 
 model IdempotencyKey {

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import { getJurisdiction, calculateTax } from "./jurisdictions";
+import type { TransactionStatus } from "@prisma/client";
 
 export interface NumeralTransaction {
   stripeEventId: string;
@@ -16,13 +17,15 @@ export interface NumeralTransaction {
   jurisdictionState: string | null;
   jurisdictionName: string | null;
   stripeCreatedAt: Date;
-  status: "RECORDED" | "REFUNDED";
+  status: TransactionStatus;
+  correlationId?: string;
   metadata: Record<string, unknown>;
 }
 
 export function normalizeStripeCharge(
   eventId: string,
-  charge: Stripe.Charge
+  charge: Stripe.Charge,
+  correlationId?: string
 ): NumeralTransaction {
   const billing = charge.billing_details?.address;
   const stateCode = billing?.state?.toUpperCase() ?? null;
@@ -45,6 +48,7 @@ export function normalizeStripeCharge(
     jurisdictionName: jurisdiction?.name ?? null,
     stripeCreatedAt: new Date(charge.created * 1000),
     status: charge.refunded ? "REFUNDED" : "RECORDED",
+    correlationId,
     metadata: {
       stripeDescription: charge.description,
       paymentMethod: charge.payment_method_details?.type,

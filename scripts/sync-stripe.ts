@@ -8,9 +8,10 @@
 import "dotenv/config";
 import Stripe from "stripe";
 import Redis from "ioredis";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type TransactionStatus } from "@prisma/client";
 import { normalizeStripeCharge } from "../lib/normalizer";
 import { JURISDICTION_MAP, NEXUS_THRESHOLDS, WARNING_THRESHOLD } from "../lib/jurisdictions";
+import { logger, withCorrelationId } from "../lib/logger";
 
 const prisma = new PrismaClient();
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379", {
@@ -51,11 +52,11 @@ async function upsertNexus(stateCode: string, amountCents: number) {
 
 async function main() {
   if (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_")) {
-    console.error("STRIPE_SECRET_KEY missing or placeholder.");
+    logger.error("STRIPE_SECRET_KEY missing or placeholder.");
     process.exit(1);
   }
 
-  console.log("Pulling charges from Stripe...");
+  logger.info("Starting Stripe sync");
 
   const all: Stripe.Charge[] = [];
   let startingAfter: string | undefined;
@@ -70,11 +71,15 @@ async function main() {
     if (!startingAfter) break;
   }
 
-  console.log(`Fetched ${all.length} charges. Ingesting...`);
+  logger.info({ totalCharges: all.length }, "Fetched charges from Stripe");
 
   let inserted = 0;
   let skipped = 0;
   let failed = 0;
+
+  // Generate a correlation ID for this sync run
+  const correlationId = `sync_${Date.now()}`;
+  const log = withCorrelationId(correlationId);
 
   for (const charge of all) {
     if (charge.status !== "succeeded") continue;
@@ -88,7 +93,7 @@ async function main() {
     }
 
     try {
-      const normalized = normalizeStripeCharge(eventId, charge);
+      const normalized = normalizeStripeCharge(eventId, charge, correlationId);
       const { metadata, ...rest } = normalized;
 
       await prisma.webhookEvent.upsert({
@@ -109,19 +114,31 @@ async function main() {
         create: { ...rest, metadata: metadata as object },
       });
 
-      // Only update nexus if this was a fresh insert (not an upsert no-op).
+      // Record initial state transition for fresh inserts
       const isFresh = result.processedAt.getTime() > Date.now() - 5000;
-      if (isFresh && normalized.billingState) {
-        await upsertNexus(normalized.billingState, normalized.amountCents);
+      if (isFresh) {
+        await prisma.transactionStateTransition.create({
+          data: {
+            transactionId: result.id,
+            fromStatus: null,
+            toStatus: normalized.status as TransactionStatus,
+            reason: "sync_ingestion",
+            metadata: { correlationId, eventId },
+          },
+        });
+
+        if (normalized.billingState) {
+          await upsertNexus(normalized.billingState, normalized.amountCents);
+        }
       }
       inserted++;
     } catch (err) {
       failed++;
-      console.error(`  failed ${charge.id}:`, err instanceof Error ? err.message : err);
+      log.error({ stripeChargeId: charge.id, error: err instanceof Error ? err.message : err }, "Failed to process charge");
     }
   }
 
-  console.log(`Done. inserted=${inserted} skipped=${skipped} failed=${failed}`);
+  logger.info({ inserted, skipped, failed, correlationId }, "Sync completed");
   await prisma.$disconnect();
   await redis.quit();
 }

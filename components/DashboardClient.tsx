@@ -8,6 +8,7 @@ import { ReconciliationPanel } from "./ReconciliationPanel";
 import { NexusTracker } from "./NexusTracker";
 import { EventLog } from "./EventLog";
 import { SystemStatus } from "./SystemStatus";
+import DeadLetterQueue from "./DeadLetterQueue";
 
 type Props = {
   transactions: any[];
@@ -189,6 +190,10 @@ export default function DashboardClient(props: Props) {
 
         <section>
           <EventLog events={props.events} />
+        </section>
+
+        <section>
+          <DeadLetterQueue />
         </section>
       </main>
     </div>
